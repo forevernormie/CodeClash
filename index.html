@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CodeClash - 1v1 Battle</title>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #1e1e1e; color: #0f0; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .hidden { display: none; }
+        
+        /* Auth Screen */
+        .box { border: 2px solid #0f0; padding: 20px; margin-bottom: 20px; }
+        input { background: #333; color: #fff; border: 1px solid #0f0; padding: 10px; width: 200px; }
+        button { background: #0f0; color: #000; padding: 10px 20px; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #fff; }
+
+        /* Game Area */
+        .hud { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .score-box { text-align: center; border: 1px solid #555; padding: 10px; width: 45%; }
+        .score-bar { height: 20px; background: #333; margin-top: 5px; }
+        .fill { height: 100%; background: #0f0; width: 0%; transition: width 0.5s; }
+        .opponent-fill { background: #f00; }
+
+        .question-box { border: 2px solid #fff; padding: 20px; min-height: 200px; }
+        .options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        .option-btn { background: #333; color: #fff; padding: 15px; text-align: left; border: 1px solid #555; }
+        .option-btn:hover { background: #444; }
+        
+        #timer { font-size: 24px; color: #ff0; font-weight: bold; text-align: center; margin: 10px 0; }
+        #status-log { color: #888; font-size: 12px; margin-top: 20px; height: 100px; overflow-y: scroll; border-top: 1px solid #333; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>> CODE_CLASH_V1</h1>
+
+    <div id="login-screen" class="box">
+        <h3>__AUTH__</h3>
+        <input type="text" id="username" placeholder="Username (e.g. Manas)">
+        <input type="password" id="password" placeholder="Password">
+        <button onclick="login()">LOGIN</button>
+        <button onclick="register()">REGISTER</button>
+        <p id="auth-msg"></p>
+    </div>
+
+    <div id="lobby-screen" class="box hidden">
+        <h3>__LOBBY__</h3>
+        <p>Welcome, <span id="display-user"></span></p>
+        <button onclick="findMatch()">FIND MATCH</button>
+        <p id="lobby-status">System: Idle</p>
+    </div>
+
+    <div id="game-screen" class="hidden">
+        <div class="hud">
+            <div class="score-box">
+                <div>YOU</div>
+                <div class="score-bar"><div id="my-score-fill" class="fill"></div></div>
+                <div id="my-score">0</div>
+            </div>
+            <div class="score-box">
+                <div>OPPONENT</div>
+                <div class="score-bar"><div id="opp-score-fill" class="fill opponent-fill"></div></div>
+                <div id="opp-score">0</div>
+            </div>
+        </div>
+
+        <div id="timer">15</div>
+
+        <div class="question-box">
+            <h3 id="q-text">Loading...</h3>
+            <div class="options">
+                <button class="option-btn" onclick="submitAnswer('A')" id="btn-A">A</button>
+                <button class="option-btn" onclick="submitAnswer('B')" id="btn-B">B</button>
+                <button class="option-btn" onclick="submitAnswer('C')" id="btn-C">C</button>
+                <button class="option-btn" onclick="submitAnswer('D')" id="btn-D">D</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="status-log"></div>
+</div>
+
+<script>
+    const API_URL = "http://127.0.0.1:8000";
+    const WS_URL = "ws://127.0.0.1:8000/ws/matchmaking";
+    
+    let token = null;
+    let currentUser = null;
+    let socket = null;
+    let gameData = null;
+    let currentQIndex = 0;
+    let myScore = 0;
+    let oppScore = 0;
+    let timerInterval = null;
+
+    function log(msg) {
+        const div = document.getElementById('status-log');
+        div.innerHTML = `> ${msg}<br>` + div.innerHTML;
+    }
+
+    async function register() {
+        const u = document.getElementById('username').value;
+        const p = document.getElementById('password').value;
+        try {
+            const res = await fetch(`${API_URL}/register`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: u, email: u+"@test.com", password: p})
+            });
+            if(res.ok) alert("Registered! Now Login.");
+            else alert("Error registering");
+        } catch(e) { console.error(e); }
+    }
+
+    async function login() {
+        const u = document.getElementById('username').value;
+        const p = document.getElementById('password').value;
+        
+        const res = await fetch(`${API_URL}/login`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username: u, password: p})
+        });
+        
+        if(res.ok) {
+            const data = await res.json();
+            token = data.access_token;
+            currentUser = u;
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('lobby-screen').classList.remove('hidden');
+            document.getElementById('display-user').innerText = u;
+        } else {
+            alert("Login Failed");
+        }
+    }
+
+    function findMatch() {
+        document.getElementById('lobby-status').innerText = "Connecting to Neural Network...";
+        socket = new WebSocket(`${WS_URL}/${currentUser}`);
+        
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            log("RX: " + data.type);
+            
+            if(data.type === "GAME_START") {
+                startGame(data);
+            } else if (data.type === "ANSWER_RESULT") {
+                handleResult(data);
+            } else if (data.type === "OPPONENT_UPDATE") {
+                handleOpponentUpdate(data);
+            } else if (data.msg) {
+                document.getElementById('lobby-status').innerText = data.msg;
+            }
+        };
+    }
+
+    function startGame(data) {
+        gameData = data;
+        document.getElementById('lobby-screen').classList.add('hidden');
+        document.getElementById('game-screen').classList.remove('hidden');
+        loadQuestion(0);
+    }
+
+    function loadQuestion(index) {
+        if(index >= gameData.questions.length) {
+            log("Sending Game Finish signal...");
+            
+            // 1. Send Signal to Server
+            socket.send(JSON.stringify({
+                type: "FINISH_GAME",
+                game_id: gameData.game_id
+            }));
+            
+            // 2. Show Alert
+            alert("GAME OVER! Final Score: " + myScore);
+            return;
+        }
+        
+        if(index >= gameData.questions.length) {
+            alert("GAME OVER! Final Score: " + myScore);
+            location.reload();
+            return;
+        }
+        currentQIndex = index;
+        const q = gameData.questions[index];
+        
+        document.getElementById('q-text').innerText = q.question;
+        document.getElementById('btn-A').innerText = "A: " + q.options.A;
+        document.getElementById('btn-B').innerText = "B: " + q.options.B;
+        document.getElementById('btn-C').innerText = "C: " + q.options.C;
+        document.getElementById('btn-D').innerText = "D: " + q.options.D;
+        
+        // Reset Buttons
+        ['A','B','C','D'].forEach(k => {
+            document.getElementById('btn-'+k).style.background = "#333";
+            document.getElementById('btn-'+k).disabled = false;
+        });
+
+        // Start Timer
+        let timeLeft = 15;
+        document.getElementById('timer').innerText = timeLeft;
+        clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            timeLeft--;
+            document.getElementById('timer').innerText = timeLeft;
+            if(timeLeft <= 0) {
+                clearInterval(timerInterval);
+                loadQuestion(currentQIndex + 1); // Auto skip
+            }
+        }, 1000);
+    }
+
+    function submitAnswer(ans) {
+        // Visual Feedback
+        document.getElementById('btn-'+ans).style.background = "#555";
+        
+        // Disable all buttons to prevent double click
+        ['A','B','C','D'].forEach(k => document.getElementById('btn-'+k).disabled = true);
+        
+        const payload = {
+            type: "SUBMIT_ANSWER",
+            game_id: gameData.game_id,
+            q_id: gameData.questions[currentQIndex].id,
+            answer: ans,
+            opponent: gameData.opponent // AUTOMATICALLY FIXES YOUR BUG
+        };
+        socket.send(JSON.stringify(payload));
+    }
+
+    function handleResult(data) {
+        if(data.correct) {
+            log("CORRECT! +10 Points");
+            myScore = data.score;
+            document.getElementById('my-score').innerText = myScore;
+            document.getElementById('my-score-fill').style.width = Math.min(myScore, 100) + "%";
+        } else {
+            log("WRONG!");
+        }
+        // Wait 1s then next question
+        setTimeout(() => loadQuestion(currentQIndex + 1), 1000);
+    }
+
+    function handleOpponentUpdate(data) {
+        log("Opponent Scored!");
+        oppScore = data.opponent_score;
+        document.getElementById('opp-score').innerText = oppScore;
+        document.getElementById('opp-score-fill').style.width = Math.min(oppScore, 100) + "%";
+    }
+</script>
+</body>
+</html>
