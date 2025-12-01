@@ -8,3 +8,5 @@ passlib[bcrypt]
 redis
 email-validator
 python-multipart
+datasets
+argon2-cffi
