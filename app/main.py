@@ -159,7 +159,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                         "correct": False
                     }, username)
             # --- NEW LOGIC: INSERT THIS BLOCK HERE ---
-            if message.get("type") == "FINISH_GAME":
+            elif message.get("type") == "FINISH_GAME":
                 gid = message.get("game_id")
                 
                 print(f"🏁 User {username} finished game {gid}")
@@ -183,6 +183,13 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                     
                 # 3. Acknowledge the client (Optional)
                 await manager.send_personal_message({"type": "GAME_OVER_ACK"}, username)
+            # --- NEW LOGIC: CANCEL SEARCH ---
+            elif message.get("type") == "CANCEL_SEARCH":
+                await matchmaker.remove_from_queue(username)
+                await manager.send_personal_message({
+                    "type": "status", 
+                    "msg": "Search Canceled."
+                }, username)
 
     except WebSocketDisconnect:
         manager.disconnect(username)

@@ -36,30 +36,40 @@
     <h1>> CODE_CLASH_V1</h1>
 
     <div id="login-screen" class="box">
-        <h3>__AUTH__</h3>
-        <input type="text" id="username" placeholder="Username (e.g. Manas)">
+        <h3 id="auth-title">__LOGIN__</h3>
+        
+        <input type="text" id="username" placeholder="Username">
         <input type="password" id="password" placeholder="Password">
-        <button onclick="login()">LOGIN</button>
-        <button onclick="register()">REGISTER</button>
-        <p id="auth-msg"></p>
+        
+        <input type="email" id="email" placeholder="Email (e.g. user@gmail.com)" class="hidden" style="margin-top:5px;">
+        
+        <br><br>
+        
+        <button id="auth-action-btn" onclick="handleAuth()">LOGIN</button>
+        
+        <p style="font-size: 12px; margin-top: 10px; cursor: pointer; color: #888;" onclick="toggleAuthMode()">
+            <u id="auth-toggle-text">Need an account? Register here.</u>
+        </p>
+
+        <p id="auth-msg" style="color: red; margin-top: 10px;"></p>
     </div>
 
     <div id="lobby-screen" class="box hidden">
         <h3>__LOBBY__</h3>
         <p>Welcome, <span id="display-user"></span></p>
-        <button onclick="findMatch()">FIND MATCH</button>
+        <button id="match-btn" onclick="toggleMatchmaking()">FIND MATCH</button>
         <p id="lobby-status">System: Idle</p>
     </div>
 
     <div id="game-screen" class="hidden">
         <div class="hud">
             <div class="score-box">
-                <div>YOU</div>
+                <div id="my-name" style="font-weight:bold; color:#0f0">YOU</div>
                 <div class="score-bar"><div id="my-score-fill" class="fill"></div></div>
                 <div id="my-score">0</div>
             </div>
             <div class="score-box">
-                <div>OPPONENT</div>
+                <div id="opp-name" style="font-weight:bold; color:#f00">OPPONENT</div>
                 <div class="score-bar"><div id="opp-score-fill" class="fill opponent-fill"></div></div>
                 <div id="opp-score">0</div>
             </div>
@@ -77,13 +87,25 @@
             </div>
         </div>
     </div>
-
+    <div id="result-screen" class="box hidden" style="text-align: center;">
+        <h2 id="result-title">GAME OVER</h2>
+        <h1 id="result-score" style="font-size: 48px; margin: 10px 0;">0</h1>
+        <p>Final Score</p>
+        <br>
+        <button onclick="returnToLobby()">RETURN TO LOBBY</button>
+    </div>
     <div id="status-log"></div>
 </div>
 
 <script>
     const API_URL = "http://127.0.0.1:8000";
     const WS_URL = "ws://127.0.0.1:8000/ws/matchmaking";
+    // Update this to your ACTUAL Render URL
+    // const SERVER_URL = "https://codeclash-70rt.onrender.com"; 
+    
+    // const API_URL = SERVER_URL;
+    // // Notice the 'wss' (Secure WebSocket) replacement
+    // const WS_URL = SERVER_URL.replace("https", "wss") + "/ws/matchmaking";
     
     let token = null;
     let currentUser = null;
@@ -99,44 +121,101 @@
         div.innerHTML = `> ${msg}<br>` + div.innerHTML;
     }
 
-    async function register() {
-        const u = document.getElementById('username').value;
-        const p = document.getElementById('password').value;
+    let isRegisterMode = false;
+
+    function toggleAuthMode() {
+    isRegisterMode = !isRegisterMode;
+    const title = document.getElementById('auth-title');
+    const btn = document.getElementById('auth-action-btn');
+    const toggleText = document.getElementById('auth-toggle-text');
+    const emailInput = document.getElementById('email');
+
+    if (isRegisterMode) {
+        title.innerText = "__REGISTER__";
+        btn.innerText = "CREATE ACCOUNT";
+        toggleText.innerText = "Have an account? Login here.";
+        emailInput.classList.remove('hidden'); // Show Email
+    } else {
+        title.innerText = "__LOGIN__";
+        btn.innerText = "LOGIN";
+        toggleText.innerText = "Need an account? Register here.";
+        emailInput.classList.add('hidden'); // Hide Email
+    }
+}
+
+    async function handleAuth() {
+    const u = document.getElementById('username').value;
+    const p = document.getElementById('password').value;
+    const e = document.getElementById('email').value;
+    const msg = document.getElementById('auth-msg');
+
+    if(!u || !p) {
+        msg.innerText = "Username and Password required.";
+        return;
+    }
+
+    if (isRegisterMode) {
+        // --- REGISTER LOGIC ---
+        if(!e) {
+            msg.innerText = "Email is required for registration.";
+            return;
+        }
+        
         try {
             const res = await fetch(`${API_URL}/register`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username: u, email: u+"@test.com", password: p})
+                // FIX: Sending the REAL email now
+                body: JSON.stringify({username: u, email: e, password: p})
             });
-            if(res.ok) alert("Registered! Now Login.");
-            else alert("Error registering");
-        } catch(e) { console.error(e); }
-    }
+            
+            if(res.ok) {
+                alert("Account Created! Please Login.");
+                toggleAuthMode(); // Switch back to login view
+            } else {
+                const err = await res.json();
+                msg.innerText = "Error: " + (err.detail || "Registration failed");
+            }
+        } catch(err) { console.error(err); msg.innerText = "Server Error"; }
 
-    async function login() {
-        const u = document.getElementById('username').value;
-        const p = document.getElementById('password').value;
-        
-        const res = await fetch(`${API_URL}/login`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({username: u, password: p})
-        });
-        
-        if(res.ok) {
-            const data = await res.json();
-            token = data.access_token;
-            currentUser = u;
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('lobby-screen').classList.remove('hidden');
-            document.getElementById('display-user').innerText = u;
-        } else {
-            alert("Login Failed");
-        }
+    } else {
+        // --- LOGIN LOGIC ---
+        try {
+            const res = await fetch(`${API_URL}/login`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: u, password: p})
+            });
+            
+            if(res.ok) {
+                const data = await res.json();
+                token = data.access_token;
+                currentUser = u;
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('lobby-screen').classList.remove('hidden');
+                document.getElementById('display-user').innerText = u;
+            } else {
+                msg.innerText = "Invalid Credentials";
+            }
+        } catch(err) { console.error(err); msg.innerText = "Server Error"; }
     }
+}
 
-    function findMatch() {
-        document.getElementById('lobby-status').innerText = "Connecting to Neural Network...";
+    let isSearching = false; // Track state
+
+    function toggleMatchmaking() {
+    const btn = document.getElementById('match-btn');
+    const status = document.getElementById('lobby-status');
+
+    if (!isSearching) {
+        // --- START SEARCH ---
+        status.innerText = "Connecting to Neural Network...";
+        btn.innerText = "CANCEL SEARCH";
+        btn.style.background = "#f00"; // Red color
+        btn.style.color = "#fff";
+        isSearching = true;
+
+        // Connect WebSocket
         socket = new WebSocket(`${WS_URL}/${currentUser}`);
         
         socket.onmessage = function(event) {
@@ -150,54 +229,98 @@
             } else if (data.type === "OPPONENT_UPDATE") {
                 handleOpponentUpdate(data);
             } else if (data.msg) {
-                document.getElementById('lobby-status').innerText = data.msg;
+                status.innerText = data.msg;
             }
         };
-    }
 
-    function startGame(data) {
+        socket.onclose = function() {
+            // Reset UI if connection dies
+            resetLobbyUI();
+        };
+
+    } else {
+        // --- CANCEL SEARCH ---
+        if(socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "CANCEL_SEARCH" }));
+            socket.close(); // Cut the connection
+        }
+        resetLobbyUI();
+        status.innerText = "Search Canceled by User.";
+    }
+}
+
+    function resetLobbyUI() {
+    const btn = document.getElementById('match-btn');
+    btn.innerText = "FIND MATCH";
+    btn.style.background = "#0f0"; // Back to Green
+    btn.style.color = "#000";
+    isSearching = false;
+}
+
+function startGame(data) {
         gameData = data;
+        
+        // --- UX FIX: Set Names ---
+        document.getElementById('my-name').innerText = currentUser + " (YOU)";
+        document.getElementById('opp-name').innerText = data.opponent;
+        
+        // Reset Scores UI
+        myScore = 0;
+        oppScore = 0;
+        document.getElementById('my-score').innerText = "0";
+        document.getElementById('opp-score').innerText = "0";
+        document.getElementById('my-score-fill').style.width = "0%";
+        document.getElementById('opp-score-fill').style.width = "0%";
+
+        // Switch Screens
         document.getElementById('lobby-screen').classList.add('hidden');
+        document.getElementById('result-screen').classList.add('hidden'); // Ensure result is hidden
         document.getElementById('game-screen').classList.remove('hidden');
+        
         loadQuestion(0);
     }
 
     function loadQuestion(index) {
+        // --- UX FIX: Smooth Game Over ---
         if(index >= gameData.questions.length) {
-            log("Sending Game Finish signal...");
+            log("Game Finished. Sending signal...");
             
-            // 1. Send Signal to Server
-            socket.send(JSON.stringify({
-                type: "FINISH_GAME",
-                game_id: gameData.game_id
-            }));
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: "FINISH_GAME",
+                    game_id: gameData.game_id
+                }));
+                // We don't close socket immediately, we wait for ACK or just close now.
+                // For v1.1, let's close it here to be safe and show results.
+                socket.close();
+            }
             
-            // 2. Show Alert
-            alert("GAME OVER! Final Score: " + myScore);
+            showResults();
             return;
         }
-        
-        if(index >= gameData.questions.length) {
-            alert("GAME OVER! Final Score: " + myScore);
-            location.reload();
-            return;
-        }
+
         currentQIndex = index;
         const q = gameData.questions[index];
-        
+        // ... (Rest of the function remains the same: Setting text, buttons, timer) ...
         document.getElementById('q-text').innerText = q.question;
-        document.getElementById('btn-A').innerText = "A: " + q.options.A;
-        document.getElementById('btn-B').innerText = "B: " + q.options.B;
-        document.getElementById('btn-C').innerText = "C: " + q.options.C;
-        document.getElementById('btn-D').innerText = "D: " + q.options.D;
-        
-        // Reset Buttons
-        ['A','B','C','D'].forEach(k => {
-            document.getElementById('btn-'+k).style.background = "#333";
-            document.getElementById('btn-'+k).disabled = false;
-        });
+        // ... (Keep your existing button logic here) ...
+        const setupBtn = (key, text) => {
+            const btn = document.getElementById('btn-' + key);
+            if (!text || text.trim() === "") {
+                btn.style.display = "none";
+            } else {
+                btn.style.display = "block";
+                btn.innerText = key + ": " + text;
+                btn.style.background = "#333";
+                btn.disabled = false;
+            }
+        };
+        setupBtn('A', q.options.A);
+        setupBtn('B', q.options.B);
+        setupBtn('C', q.options.C);
+        setupBtn('D', q.options.D);
 
-        // Start Timer
+        // Reset Timer logic (Keep your existing timer code)
         let timeLeft = 15;
         document.getElementById('timer').innerText = timeLeft;
         clearInterval(timerInterval);
@@ -206,7 +329,7 @@
             document.getElementById('timer').innerText = timeLeft;
             if(timeLeft <= 0) {
                 clearInterval(timerInterval);
-                loadQuestion(currentQIndex + 1); // Auto skip
+                loadQuestion(currentQIndex + 1);
             }
         }, 1000);
     }
@@ -246,6 +369,32 @@
         oppScore = data.opponent_score;
         document.getElementById('opp-score').innerText = oppScore;
         document.getElementById('opp-score-fill').style.width = Math.min(oppScore, 100) + "%";
+    }
+    function showResults() {
+        document.getElementById('game-screen').classList.add('hidden');
+        document.getElementById('result-screen').classList.remove('hidden');
+        
+        document.getElementById('result-score').innerText = myScore;
+        
+        // Simple Win/Loss Logic (Visual only)
+        const title = document.getElementById('result-title');
+        if(myScore > oppScore) {
+            title.innerText = "VICTORY";
+            title.style.color = "#0f0";
+        } else if (myScore < oppScore) {
+            title.innerText = "DEFEAT";
+            title.style.color = "#f00";
+        } else {
+            title.innerText = "DRAW";
+            title.style.color = "#fff";
+        }
+    }
+
+    function returnToLobby() {
+        document.getElementById('result-screen').classList.add('hidden');
+        document.getElementById('lobby-screen').classList.remove('hidden');
+        resetLobbyUI(); // Reset button to green
+        document.getElementById('lobby-status').innerText = "Ready for next battle.";
     }
 </script>
 </body>
