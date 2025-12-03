@@ -352,16 +352,38 @@ function startGame(data) {
     }
 
     function handleResult(data) {
+        // 1. Identify which button the USER clicked (we need to track this)
+        // Since we disabled buttons in submitAnswer, we can find the one with style background #555
+        let clickedBtnId = null;
+        ['A','B','C','D'].forEach(k => {
+            const btn = document.getElementById('btn-'+k);
+            if(btn.style.background === "rgb(85, 85, 85)" || btn.style.background === "#555") {
+                clickedBtnId = 'btn-'+k;
+            }
+        });
+
+        // 2. Logic for Colors
+        const correctBtnId = 'btn-' + data.correct_option; // e.g., btn-B
+
         if(data.correct) {
             log("CORRECT! +10 Points");
+            // Turn clicked button GREEN
+            if(clickedBtnId) document.getElementById(clickedBtnId).style.background = "#0f0"; // Green
+            
+            // Update Score
             myScore = data.score;
             document.getElementById('my-score').innerText = myScore;
             document.getElementById('my-score-fill').style.width = Math.min(myScore, 100) + "%";
         } else {
-            log("WRONG!");
+            log("WRONG! Correct was " + data.correct_option);
+            // Turn clicked button RED
+            if(clickedBtnId) document.getElementById(clickedBtnId).style.background = "#f00"; // Red
+            // Turn actual correct button GREEN (to show them the right answer)
+            document.getElementById(correctBtnId).style.background = "#0f0"; 
         }
-        // Wait 1s then next question
-        setTimeout(() => loadQuestion(currentQIndex + 1), 1000);
+
+        // 3. Wait 1.5s (slightly longer) then next question
+        setTimeout(() => loadQuestion(currentQIndex + 1), 1500);
     }
 
     function handleOpponentUpdate(data) {

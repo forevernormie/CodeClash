@@ -132,31 +132,46 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                 q_id = message.get("q_id")
                 ans = message.get("answer")
                 gid = message.get("game_id")
-                opponent_name = message.get("opponent") # Client must send this!
+                opponent_name = message.get("opponent")
 
-                is_correct = await game_utils.check_answer(q_id, ans)
+                # 1. Fetch the Question to get the correct letter
+                async with database.SessionLocal() as session:
+                    q_result = await session.execute(
+                        select(models.Question).where(models.Question.id == q_id)
+                    )
+                    question_obj = q_result.scalars().first()
+                
+                # Safety check
+                if not question_obj:
+                    continue
+
+                actual_correct_option = question_obj.correct_option
+                is_correct = (actual_correct_option == ans)
                 
                 if is_correct:
                     # Update Score
                     new_score = await game_state.update_score(gid, username, 10)
                     
-                    # Notify Self
+                    # Notify Self (WITH correct_option)
                     await manager.send_personal_message({
                         "type": "ANSWER_RESULT",
                         "correct": True,
-                        "score": new_score
+                        "score": new_score,
+                        "correct_option": actual_correct_option 
                     }, username)
                     
-                    # Notify Opponent (So they see your bar go up!)
+                    # Notify Opponent
                     if opponent_name:
                         await manager.broadcast_to_user({
                             "type": "OPPONENT_UPDATE",
                             "opponent_score": new_score
                         }, opponent_name)
                 else:
-                     await manager.send_personal_message({
+                    # Notify Self (WITH correct_option)
+                    await manager.send_personal_message({
                         "type": "ANSWER_RESULT",
-                        "correct": False
+                        "correct": False,
+                        "correct_option": actual_correct_option 
                     }, username)
             # --- NEW LOGIC: INSERT THIS BLOCK HERE ---
             elif message.get("type") == "FINISH_GAME":
